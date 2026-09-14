@@ -3,3 +3,4 @@ CSEC-201 Remote File Management Protocol (RFMP) project using Python socket prog
 
 1. Yerkebulan Yergeshbay - 759000935
 2. Muhammad Usman Habib - 761005924
+3. Izhan Akhtar - 421009836
