@@ -21,7 +21,7 @@ while True:
     packet_type, fields = parse_packet(start_message)
 
     # Validate the Start Packet and send confirmation
-    if packet_type == SS and validate_packet(fields):
+    if packet_type == SS and validate_packet(packet_type, fields):
         confirm_packet = create_packet(CC)
         clientsocket.send(confirm_packet.encode("utf-8"))
         print("RFMP connection confirmed")
