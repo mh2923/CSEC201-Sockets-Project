@@ -1,3 +1,4 @@
+# Izhan_protocol.py
 # Shared packet definitions for the client and server.
 
 PROTOCOL_NAME = "RFMP"
@@ -18,6 +19,9 @@ PACKET_TYPES = [SS, CC, EC, CM, DP, SC, EE, END]
 # Packets that end with free text (which may contain commas)
 # are only split a limited number of times.
 MAX_SPLITS = {CM: 2, EE: 2, DP: 1, SC: 1}
+
+# How many fields each packet type should have (CC can be 0 or 1)
+FIELD_COUNTS = {SS: [3], CC: [0, 1], EC: [3], CM: [2], DP: [1], SC: [0], EE: [2], END: [0]}
 
 
 def create_packet(packet_type, *fields):
@@ -53,6 +57,26 @@ def parse_packet(packet):
     return packet_type, [p.strip() for p in parts[1:]]
 
 
+def validate_packet(packet_type, fields):
+    """Check a parsed packet's fields make sense for its type.
+    Returns True if OK, otherwise raises ValueError."""
+    if packet_type not in PACKET_TYPES:
+        raise ValueError("Unknown packet type: " + packet_type)
+
+    if packet_type in FIELD_COUNTS:
+        if len(fields) not in FIELD_COUNTS[packet_type]:
+            raise ValueError(packet_type + " packet has the wrong number of fields")
+
+    if packet_type == SS:
+        protocol, version, secure = fields
+        if protocol != PROTOCOL_NAME:
+            raise ValueError("Unexpected protocol name: " + protocol)
+        if secure not in ("0", "1"):
+            raise ValueError("Secure flag must be 0 or 1")
+
+    return True
+
+
 if __name__ == "__main__":
     p = create_packet(SS, PROTOCOL_NAME, PROTOCOL_VERSION, 0)
     print(p)
@@ -60,3 +84,10 @@ if __name__ == "__main__":
     print(parse_packet("(CM, prompt, mkdir a,b)"))
     print(parse_packet("(DP, Hello, World)"))
     print(parse_packet("(End)"))
+
+    print(validate_packet(*parse_packet("(SS,RFMP,v1.0,0)")))   # True
+    print(validate_packet(*parse_packet("(CM,prompt,ls)")))     # True
+    try:
+        validate_packet(*parse_packet("(SS,WRONG,v1.0,0)"))
+    except ValueError as e:
+        print("caught:", e)
