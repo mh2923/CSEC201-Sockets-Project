@@ -23,6 +23,14 @@ MAX_SPLITS = {CM: 2, EE: 2, DP: 1, SC: 1}
 # How many fields each packet type should have (CC can be 0 or 1)
 FIELD_COUNTS = {SS: [3], CC: [0, 1], EC: [3], CM: [2], DP: [1], SC: [0], EE: [2], END: [0]}
 
+# error codes we're using (max 4, as allowed by the brief)
+ERROR_CODES = {
+    "E1": "File not found",
+    "E2": "Permission denied",
+    "E3": "Invalid command or arguments",
+    "E4": "Unknown error",
+}
+
 
 def create_packet(packet_type, *fields):
     """Build a packet string, e.g. "(SS,RFMP,v1.0,0)"."""
@@ -77,17 +85,36 @@ def validate_packet(packet_type, fields):
     return True
 
 
-if __name__ == "__main__":
-    p = create_packet(SS, PROTOCOL_NAME, PROTOCOL_VERSION, 0)
-    print(p)
-    print(parse_packet(p))
-    print(parse_packet("(CM, prompt, mkdir a,b)"))
-    print(parse_packet("(DP, Hello, World)"))
-    print(parse_packet("(End)"))
-
-    print(validate_packet(*parse_packet("(SS,RFMP,v1.0,0)")))   # True
-    print(validate_packet(*parse_packet("(CM,prompt,ls)")))     # True
+def handle_open_read(filename):
+    # returns (True, contents) if it worked, or (False, (code, message)) if not
     try:
-        validate_packet(*parse_packet("(SS,WRONG,v1.0,0)"))
-    except ValueError as e:
-        print("caught:", e)
+        with open(filename, "r") as f:
+            return True, f.read()
+    except FileNotFoundError:
+        return False, ("E1", "File not found: " + filename)
+    except PermissionError:
+        return False, ("E2", "Permission denied: " + filename)
+    except Exception as e:
+        return False, ("E4", str(e))
+
+
+def handle_open_write(filename, data):
+    # appends data to the file, returns (True, message) or (False, (code, message))
+    try:
+        with open(filename, "a") as f:
+            f.write(data)
+        return True, "Data written to " + filename
+    except PermissionError:
+        return False, ("E2", "Permission denied: " + filename)
+    except Exception as e:
+        return False, ("E4", str(e))
+
+
+def make_success_packet(message=""):
+    if message:
+        return create_packet(SC, message)
+    return create_packet(SC)
+
+
+def make_error_packet(error_code, description):
+    return create_packet(EE, error_code, description)
