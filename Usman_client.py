@@ -1,7 +1,7 @@
 # Usman_client.py
 
 import socket
-from Izhan_protocol import create_packet, SS, CM, PROTOCOL_NAME, PROTOCOL_VERSION
+from Izhan_protocol import create_packet, SS, CM, DP, PROTOCOL_NAME, PROTOCOL_VERSION
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -26,7 +26,9 @@ while True:
     print("4. Delete file")
     print("5. Rename file/folder")
     print("6. Enter another system command")
-    print("7. Exit")
+    print("7. Read file")
+    print("8. Write file")
+    print("9. Exit")
 
     choice = input("Choose an option: ")
 
@@ -55,6 +57,35 @@ while True:
         command = input("Enter system command: ")
 
     elif choice == "7":
+        filename = input("Enter file name to read: ")
+
+        command_packet = create_packet(CM, "openRead", filename)
+        client_socket.send(command_packet.encode("utf-8"))
+
+        response = client_socket.recv(2024)
+        print("File contents: " + response.decode("utf-8"))
+
+        continue
+
+    elif choice == "8":
+        filename = input("Enter file name to write: ")
+
+        # Tell the server which file should be opened
+        command_packet = create_packet(CM, "openWrite", filename)
+        client_socket.send(command_packet.encode("utf-8"))
+
+        # Enter the data that will be written to the file
+        text = input("Enter text to write: ")
+
+        data_packet = create_packet(DP, text)
+        client_socket.send(data_packet.encode("utf-8"))
+
+        response = client_socket.recv(2024)
+        print("Server: " + response.decode("utf-8"))
+
+        continue
+
+    elif choice == "9":
         break
 
     else:
