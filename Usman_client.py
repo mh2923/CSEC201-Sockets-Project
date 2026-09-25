@@ -1,7 +1,22 @@
 # Usman_client.py
 
 import socket
-from Izhan_protocol import create_packet, SS, CM, DP, PROTOCOL_NAME, PROTOCOL_VERSION
+from Izhan_protocol import create_packet, parse_packet, SS, CM, DP, SC, EE, PROTOCOL_NAME, PROTOCOL_VERSION
+
+def handle_response(response):
+    packet_type, fields = parse_packet(response)
+
+    if packet_type == SC:
+        if len(fields) > 0:
+            print("Success: " + fields[0])
+        else:
+            print("Success")
+
+    elif packet_type == EE:
+        print("Error " + fields[0] + ": " + fields[1])
+
+    else:
+        print("Server: " + response)
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -62,8 +77,12 @@ while True:
         command_packet = create_packet(CM, "openRead", filename)
         client_socket.send(command_packet.encode("utf-8"))
 
-        response = client_socket.recv(2024)
-        print("File contents: " + response.decode("utf-8"))
+        response = client_socket.recv(2024).decode("utf-8")
+
+        if response.startswith("(EE,"):
+            handle_response(response)
+        else:
+            print("File contents: " + response)
 
         continue
 
@@ -80,8 +99,8 @@ while True:
         data_packet = create_packet(DP, text)
         client_socket.send(data_packet.encode("utf-8"))
 
-        response = client_socket.recv(2024)
-        print("Server: " + response.decode("utf-8"))
+        response = client_socket.recv(2024).decode("utf-8")
+        handle_response(response)
 
         continue
 
@@ -95,5 +114,5 @@ while True:
     command_packet = create_packet(CM, "prompt", command)
     client_socket.send(command_packet.encode("utf-8"))
 
-    response = client_socket.recv(2024)
-    print("Server: " + response.decode("utf-8"))
+    response = client_socket.recv(2024).decode("utf-8")
+    handle_response(response)
