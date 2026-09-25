@@ -79,6 +79,8 @@ def validate_packet(packet_type, fields):
         protocol, version, secure = fields
         if protocol != PROTOCOL_NAME:
             raise ValueError("Unexpected protocol name: " + protocol)
+        if version != PROTOCOL_VERSION:
+            raise ValueError("Unexpected protocol version: " + version)
         if secure not in ("0", "1"):
             raise ValueError("Secure flag must be 0 or 1")
 
@@ -99,9 +101,9 @@ def handle_open_read(filename):
 
 
 def handle_open_write(filename, data):
-    # appends data to the file, returns (True, message) or (False, (code, message))
+    # creates/overwrites the file, returns (True, message) or (False, (code, message))
     try:
-        with open(filename, "a") as f:
+        with open(filename, "w") as f:
             f.write(data)
         return True, "Data written to " + filename
     except PermissionError:
