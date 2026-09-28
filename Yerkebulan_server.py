@@ -3,6 +3,7 @@
 import socket
 import subprocess
 import base64
+import threading
 
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP, AES
@@ -10,17 +11,18 @@ from Crypto.Cipher import PKCS1_OAEP, AES
 from Izhan_protocol import (
     parse_packet,
     create_packet,
-    caesar_encrypt,
-    caesar_decrypt,
-    caesar_shift_from_key,
     validate_packet,
     make_success_packet,
     make_error_packet,
+    caesar_encrypt,
+    caesar_decrypt,
+    caesar_shift_from_key,
     SS,
     CC,
     EC,
     CM,
-    DP
+    DP,
+    END
 )
 
 
@@ -69,7 +71,343 @@ server_private_key = server_rsa_key
 server_public_key = server_rsa_key.publickey()
 
 
-serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# This function handles one connected client.
+# Each client will run inside its own thread.
+def handle_client(clientsocket, addr):
+
+    print("Got a connection from %s" % str(addr))
+
+    try:
+        # Receive RFMP Start Packet
+        start_message = clientsocket.recv(2024).decode("utf-8")
+
+        if not start_message:
+            return
+
+        print("C: " + start_message)
+
+        # Parse and validate the Start Packet
+        packet_type, fields = parse_packet(start_message)
+
+        secure_mode = False
+        algorithm = None
+        session_key = None
+        client_public_key = None
+
+        if packet_type == SS and validate_packet(packet_type, fields):
+
+            secure_flag = fields[2]
+
+            # Secure RFMP connection
+            if secure_flag == "1":
+                secure_mode = True
+
+                # Convert server public key to Base64 text
+                server_public_key_text = base64.b64encode(
+                    server_public_key.export_key()
+                ).decode("utf-8")
+
+                # Send server public key in Confirm Connection Packet
+                confirm_packet = create_packet(
+                    CC,
+                    server_public_key_text
+                )
+
+                clientsocket.send(
+                    confirm_packet.encode("utf-8")
+                )
+
+                print("Secure RFMP connection requested")
+
+                # Receive Encryption Packet from client
+                encryption_message = clientsocket.recv(4096).decode("utf-8")
+                print("C: " + encryption_message)
+
+                # Parse and validate Encryption Packet
+                encryption_type, encryption_fields = parse_packet(
+                    encryption_message
+                )
+
+                validate_packet(
+                    encryption_type,
+                    encryption_fields
+                )
+
+                if encryption_type == EC:
+
+                    algorithm = encryption_fields[0]
+                    encrypted_session_key_text = encryption_fields[1]
+                    client_information = encryption_fields[2]
+
+                    # Convert encrypted session key back to bytes
+                    encrypted_session_key = base64.b64decode(
+                        encrypted_session_key_text
+                    )
+
+                    # Decrypt session key using server private RSA key
+                    rsa_cipher = PKCS1_OAEP.new(
+                        server_private_key
+                    )
+
+                    session_key = rsa_cipher.decrypt(
+                        encrypted_session_key
+                    )
+
+                    # Separate username and client public key
+                    username, client_public_key_text = (
+                        client_information.split(":", 1)
+                    )
+
+                    # Convert client public key back into RSA key
+                    client_public_key = RSA.import_key(
+                        base64.b64decode(
+                            client_public_key_text
+                        )
+                    )
+
+                    print(
+                        "Secure RFMP setup completed using "
+                        + algorithm
+                    )
+
+            # Non-secure RFMP connection
+            else:
+                confirm_packet = create_packet(CC)
+
+                clientsocket.send(
+                    confirm_packet.encode("utf-8")
+                )
+
+                print("RFMP connection confirmed")
+
+
+        # Operation Phase
+        while True:
+
+            req = clientsocket.recv(2024)
+
+            if not req:
+                break
+
+            msg = req.decode("utf-8")
+
+            print("C: " + msg)
+
+            # Parse and validate received packet
+            packet_type, fields = parse_packet(msg)
+            validate_packet(packet_type, fields)
+
+
+            # RFMP Closing Phase
+            if packet_type == END:
+                print(
+                    "Client %s ended the RFMP connection."
+                    % str(addr)
+                )
+                break
+
+
+            # Handle normal prompt commands
+            elif packet_type == CM and fields[0] == "prompt":
+
+                command = fields[1]
+
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+
+                # Command was successful
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+
+                    if output == "":
+                        output = "Command executed successfully"
+
+                    success_packet = make_success_packet(
+                        output
+                    )
+
+                    clientsocket.send(
+                        success_packet.encode("utf-8")
+                    )
+
+                # Command failed
+                else:
+                    error_message = result.stderr.strip()
+
+                    if error_message == "":
+                        error_message = (
+                            "Invalid command or arguments"
+                        )
+
+                    error_packet = make_error_packet(
+                        "E3",
+                        error_message
+                    )
+
+                    clientsocket.send(
+                        error_packet.encode("utf-8")
+                    )
+
+
+            # Handle openRead
+            elif packet_type == CM and fields[0] == "openRead":
+
+                filename = fields[1]
+
+                try:
+                    with open(filename, "r") as file:
+                        file_contents = file.read()
+
+                    # Encrypt file contents in secure AES mode
+                    if secure_mode and algorithm == "AES":
+                        file_contents = aes_encrypt(
+                            file_contents,
+                            session_key
+                        )
+
+                    # Encrypt file contents in secure Caesar mode
+                    elif secure_mode and algorithm == "Caesar":
+                        shift = caesar_shift_from_key(
+                            session_key
+                        )
+
+                        file_contents = caesar_encrypt(
+                            file_contents,
+                            shift
+                        )
+
+                    clientsocket.send(
+                        file_contents.encode("utf-8")
+                    )
+
+                except FileNotFoundError:
+                    error_packet = make_error_packet(
+                        "E1",
+                        "File not found: " + filename
+                    )
+
+                    clientsocket.send(
+                        error_packet.encode("utf-8")
+                    )
+
+                except PermissionError:
+                    error_packet = make_error_packet(
+                        "E2",
+                        "Permission denied: " + filename
+                    )
+
+                    clientsocket.send(
+                        error_packet.encode("utf-8")
+                    )
+
+                except Exception as e:
+                    error_packet = make_error_packet(
+                        "E4",
+                        str(e)
+                    )
+
+                    clientsocket.send(
+                        error_packet.encode("utf-8")
+                    )
+
+
+            # Handle openWrite
+            elif packet_type == CM and fields[0] == "openWrite":
+
+                filename = fields[1]
+
+                # Receive Data Packet from client
+                data_message = clientsocket.recv(4096).decode("utf-8")
+                print("C: " + data_message)
+
+                data_type, data_fields = parse_packet(
+                    data_message
+                )
+
+                validate_packet(
+                    data_type,
+                    data_fields
+                )
+
+                if data_type == DP:
+                    text = data_fields[0]
+
+                    try:
+
+                        # Decrypt file contents in secure AES mode
+                        if secure_mode and algorithm == "AES":
+                            text = aes_decrypt(
+                                text,
+                                session_key
+                            )
+
+                        # Decrypt file contents in secure Caesar mode
+                        elif secure_mode and algorithm == "Caesar":
+                            shift = caesar_shift_from_key(
+                                session_key
+                            )
+
+                            text = caesar_decrypt(
+                                text,
+                                shift
+                            )
+
+                        with open(filename, "w") as file:
+                            file.write(text)
+
+                        success_packet = make_success_packet(
+                            "File written successfully"
+                        )
+
+                        clientsocket.send(
+                            success_packet.encode("utf-8")
+                        )
+
+                    except PermissionError:
+                        error_packet = make_error_packet(
+                            "E2",
+                            "Permission denied: " + filename
+                        )
+
+                        clientsocket.send(
+                            error_packet.encode("utf-8")
+                        )
+
+                    except Exception as e:
+                        error_packet = make_error_packet(
+                            "E4",
+                            str(e)
+                        )
+
+                        clientsocket.send(
+                            error_packet.encode("utf-8")
+                        )
+
+    except Exception as e:
+        print(
+            "Client %s error: %s"
+            % (str(addr), str(e))
+        )
+
+    finally:
+        # Close only this client's socket
+        clientsocket.close()
+
+        print(
+            "Connection closed for %s"
+            % str(addr)
+        )
+
+
+# Create server socket
+serverSocket = socket.socket(
+    socket.AF_INET,
+    socket.SOCK_STREAM
+)
 
 host = socket.gethostname()
 port = 8000
@@ -80,296 +418,15 @@ serverSocket.listen(5)
 print("Server is listening at port " + str(port))
 
 
+# Keep accepting new clients
 while True:
+
     clientsocket, addr = serverSocket.accept()
 
-    print("Got a connection from %s" % str(addr))
-
-    # Receive RFMP Start Packet
-    start_message = clientsocket.recv(2024).decode("utf-8")
-    print("C: " + start_message)
-
-    # Parse and validate the Start Packet
-    packet_type, fields = parse_packet(start_message)
-
-    secure_mode = False
-    algorithm = None
-    session_key = None
-    client_public_key = None
-
-    if packet_type == SS and validate_packet(packet_type, fields):
-
-        secure_flag = fields[2]
-
-        # Secure RFMP connection
-        if secure_flag == "1":
-            secure_mode = True
-
-            # Convert server public key to Base64 text
-            server_public_key_text = base64.b64encode(
-                server_public_key.export_key()
-            ).decode("utf-8")
-
-            # Send server public key in Confirm Connection Packet
-            confirm_packet = create_packet(
-                CC,
-                server_public_key_text
-            )
-
-            clientsocket.send(
-                confirm_packet.encode("utf-8")
-            )
-
-            print("Secure RFMP connection requested")
-
-            # Receive Encryption Packet from client
-            encryption_message = clientsocket.recv(4096).decode("utf-8")
-            print("C: " + encryption_message)
-
-            # Parse and validate Encryption Packet
-            encryption_type, encryption_fields = parse_packet(
-                encryption_message
-            )
-
-            validate_packet(
-                encryption_type,
-                encryption_fields
-            )
-
-            if encryption_type == EC:
-
-                algorithm = encryption_fields[0]
-                encrypted_session_key_text = encryption_fields[1]
-                client_information = encryption_fields[2]
-
-                # Convert encrypted session key back to bytes
-                encrypted_session_key = base64.b64decode(
-                    encrypted_session_key_text
-                )
-
-                # Decrypt session key using server private RSA key
-                rsa_cipher = PKCS1_OAEP.new(
-                    server_private_key
-                )
-
-                session_key = rsa_cipher.decrypt(
-                    encrypted_session_key
-                )
-
-                # Separate username and client public key
-                username, client_public_key_text = (
-                    client_information.split(":", 1)
-                )
-
-                # Convert client public key back into RSA key
-                client_public_key = RSA.import_key(
-                    base64.b64decode(
-                        client_public_key_text
-                    )
-                )
-
-                print(
-                    "Secure RFMP setup completed using "
-                    + algorithm
-                )
-
-        # Non-secure RFMP connection
-        else:
-            confirm_packet = create_packet(CC)
-
-            clientsocket.send(
-                confirm_packet.encode("utf-8")
-            )
-
-            print("RFMP connection confirmed")
-
-
-    # Operation Phase
-    while True:
-        req = clientsocket.recv(2024)
-
-        if not req:
-            break
-
-        msg = req.decode("utf-8")
-
-        print("C: " + msg)
-
-        # Parse and validate the received packet
-        packet_type, fields = parse_packet(msg)
-        validate_packet(packet_type, fields)
-
-
-        # Handle normal prompt commands
-        if packet_type == CM and fields[0] == "prompt":
-
-            command = fields[1]
-
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True
-            )
-
-            # Command was successful
-            if result.returncode == 0:
-                output = result.stdout.strip()
-
-                if output == "":
-                    output = "Command executed successfully"
-
-                success_packet = make_success_packet(
-                    output
-                )
-
-                clientsocket.send(
-                    success_packet.encode("utf-8")
-                )
-
-            # Command failed
-            else:
-                error_message = result.stderr.strip()
-
-                if error_message == "":
-                    error_message = (
-                        "Invalid command or arguments"
-                    )
-
-                error_packet = make_error_packet(
-                    "E3",
-                    error_message
-                )
-
-                clientsocket.send(
-                    error_packet.encode("utf-8")
-                )
-
-
-        # Handle openRead
-        elif packet_type == CM and fields[0] == "openRead":
-
-            filename = fields[1]
-
-            try:
-                with open(filename, "r") as file:
-                    file_contents = file.read()
-
-                # Encrypt file contents in secure AES mode
-                if secure_mode and algorithm == "AES":
-                    file_contents = aes_encrypt(
-                        file_contents,
-                        session_key
-                    )
-
-                elif secure_mode and algorithm == "Caesar":
-                    shift = caesar_shift_from_key(session_key)
-
-                    file_contents = caesar_encrypt(
-                        file_contents,
-                        shift
-                    )
-
-                clientsocket.send(
-                    file_contents.encode("utf-8")
-                )
-
-            except FileNotFoundError:
-                error_packet = make_error_packet(
-                    "E1",
-                    "File not found: " + filename
-                )
-
-                clientsocket.send(
-                    error_packet.encode("utf-8")
-                )
-
-            except PermissionError:
-                error_packet = make_error_packet(
-                    "E2",
-                    "Permission denied: " + filename
-                )
-
-                clientsocket.send(
-                    error_packet.encode("utf-8")
-                )
-
-            except Exception as e:
-                error_packet = make_error_packet(
-                    "E4",
-                    str(e)
-                )
-
-                clientsocket.send(
-                    error_packet.encode("utf-8")
-                )
-
-
-        # Handle openWrite
-        elif packet_type == CM and fields[0] == "openWrite":
-
-            filename = fields[1]
-
-            # Receive Data Packet from client
-            data_message = clientsocket.recv(4096).decode("utf-8")
-            print("C: " + data_message)
-
-            # Parse and validate Data Packet
-            data_type, data_fields = parse_packet(
-                data_message
-            )
-
-            validate_packet(
-                data_type,
-                data_fields
-            )
-
-            if data_type == DP:
-                text = data_fields[0]
-
-                try:
-
-                    # Decrypt file contents in secure AES mode
-                    if secure_mode and algorithm == "AES":
-                        text = aes_decrypt(
-                            text,
-                            session_key
-                        )
-
-                    elif secure_mode and algorithm == "Caesar":
-                        shift = caesar_shift_from_key(session_key)
-
-                        text = caesar_decrypt(
-                            text,
-                            shift
-                        )
-
-                    with open(filename, "w") as file:
-                        file.write(text)
-
-                    success_packet = make_success_packet(
-                        "File written successfully"
-                    )
-                    clientsocket.send(
-                        success_packet.encode("utf-8")
-                    )
-
-                except PermissionError:
-                    error_packet = make_error_packet(
-                        "E2",
-                        "Permission denied: " + filename
-                    )
-                    clientsocket.send(
-                        error_packet.encode("utf-8")
-                    )
-
-                except Exception as e:
-                    error_packet = make_error_packet(
-                        "E4",
-                        str(e)
-                    )
-                    clientsocket.send(
-                        error_packet.encode("utf-8")
-                    )
-
-    clientsocket.close()
+    # Create a new thread for each connected client
+    client_thread = threading.Thread(
+        target=handle_client,
+        args=(clientsocket, addr)
+    )
+
+    client_thread.start()
