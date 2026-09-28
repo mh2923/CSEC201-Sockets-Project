@@ -5,7 +5,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP, AES
 from Crypto.Random import get_random_bytes
 import base64
-from Izhan_protocol import create_packet, parse_packet, SS, EC, CM, DP, SC, EE, PROTOCOL_NAME, PROTOCOL_VERSION
+from Izhan_protocol import create_packet, parse_packet, caesar_encrypt, caesar_decrypt, caesar_shift_from_key, SS, EC, CM, DP, SC, EE, PROTOCOL_NAME, PROTOCOL_VERSION
 
 def handle_response(response):
     packet_type, fields = parse_packet(response)
@@ -223,10 +223,16 @@ while True:
 
         if response.startswith("(EE,"):
             handle_response(response)
+
         else:
-            # Decrypt file contents when secure AES mode is being used
+            # Decrypt file contents when secure mode is being used
             if secure_mode and algorithm == "AES":
                 response = aes_decrypt(response, session_key)
+
+            elif secure_mode and algorithm == "Caesar":
+                shift = caesar_shift_from_key(session_key)
+                response = caesar_decrypt(response, shift)
+
             print("File contents: " + response)
 
         continue
@@ -241,9 +247,13 @@ while True:
         # Enter the data that will be written to the file
         text = input("Enter text to write: ")
 
-        # Encrypt file contents when secure AES mode is being used
+        # Encrypt file contents when secure mode is being used
         if secure_mode and algorithm == "AES":
             text = aes_encrypt(text, session_key)
+
+        elif secure_mode and algorithm == "Caesar":
+            shift = caesar_shift_from_key(session_key)
+            text = caesar_encrypt(text, shift)
 
         data_packet = create_packet(DP, text)
         client_socket.send(data_packet.encode("utf-8"))
