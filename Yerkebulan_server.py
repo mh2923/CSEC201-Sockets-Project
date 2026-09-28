@@ -10,6 +10,9 @@ from Crypto.Cipher import PKCS1_OAEP, AES
 from Izhan_protocol import (
     parse_packet,
     create_packet,
+    caesar_encrypt,
+    caesar_decrypt,
+    caesar_shift_from_key,
     validate_packet,
     make_success_packet,
     make_error_packet,
@@ -259,6 +262,14 @@ while True:
                         session_key
                     )
 
+                elif secure_mode and algorithm == "Caesar":
+                    shift = caesar_shift_from_key(session_key)
+
+                    file_contents = caesar_encrypt(
+                        file_contents,
+                        shift
+                    )
+
                 clientsocket.send(
                     file_contents.encode("utf-8")
                 )
@@ -323,6 +334,14 @@ while True:
                         text = aes_decrypt(
                             text,
                             session_key
+                        )
+
+                    elif secure_mode and algorithm == "Caesar":
+                        shift = caesar_shift_from_key(session_key)
+
+                        text = caesar_decrypt(
+                            text,
+                            shift
                         )
 
                     with open(filename, "w") as file:
