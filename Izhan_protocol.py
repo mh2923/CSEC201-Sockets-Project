@@ -18,10 +18,13 @@ PACKET_TYPES = [SS, CC, EC, CM, DP, SC, EE, END]
 
 # Packets that end with free text (which may contain commas)
 # are only split a limited number of times.
-MAX_SPLITS = {CM: 2, EE: 2, DP: 1, SC: 1}
+MAX_SPLITS = {CM: 2, EE: 2, DP: 1, SC: 1, CC: 1, EC: 3}
 
-# How many fields each packet type should have (CC can be 0 or 1)
-FIELD_COUNTS = {SS: [3], CC: [0, 1], EC: [3], CM: [2], DP: [1], SC: [0], EE: [2], END: [0]}
+# How many fields each packet type should have (CC and SC can be 0 or 1)
+FIELD_COUNTS = {SS: [3], CC: [0, 1], EC: [3], CM: [2], DP: [1], SC: [0, 1], EE: [2], END: [0]}
+
+# encryption algorithms that can go in an EC packet
+ALGORITHMS = ["AES", "Caesar"]
 
 # error codes we're using (max 4, as allowed by the brief)
 ERROR_CODES = {
@@ -84,6 +87,12 @@ def validate_packet(packet_type, fields):
         if secure not in ("0", "1"):
             raise ValueError("Secure flag must be 0 or 1")
 
+    if packet_type == EC:
+        if fields[0] not in ALGORITHMS:
+            raise ValueError("Unknown algorithm: " + fields[0])
+        if ":" not in fields[2]:
+            raise ValueError("Last EC field must be username:public_key")
+
     return True
 
 
@@ -120,3 +129,40 @@ def make_success_packet(message=""):
 
 def make_error_packet(error_code, description):
     return create_packet(EE, error_code, description)
+
+
+def caesar_encrypt(text, key):
+    # shifts letters by key, everything else (spaces, numbers, symbols) stays the same
+    result = ""
+    for ch in text:
+        if "A" <= ch <= "Z":
+            result += chr((ord(ch) - ord("A") + key) % 26 + ord("A"))
+        elif "a" <= ch <= "z":
+            result += chr((ord(ch) - ord("a") + key) % 26 + ord("a"))
+        else:
+            result += ch
+    return result
+
+
+def caesar_decrypt(text, key):
+    # decrypting is just shifting the other way
+    return caesar_encrypt(text, -key)
+
+
+def caesar_shift_from_key(session_key):
+    # session key is bytes but Caesar needs a small number,
+    # so both sides turn the same key into the same shift (1 to 25)
+    return sum(session_key) % 25 + 1
+
+
+def make_ec_packet(algorithm, encrypted_session_key, username, client_public_key):
+    # last field is username:public_key, as in the brief
+    return create_packet(EC, algorithm, encrypted_session_key, username + ":" + client_public_key)
+
+
+def read_ec_fields(fields):
+    # splits the fields of a parsed EC packet into 4 separate values
+    algorithm = fields[0]
+    encrypted_session_key = fields[1]
+    username, client_public_key = fields[2].split(":", 1)
+    return algorithm, encrypted_session_key, username, client_public_key
