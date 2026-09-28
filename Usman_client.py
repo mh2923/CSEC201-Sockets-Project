@@ -5,7 +5,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP, AES
 from Crypto.Random import get_random_bytes
 import base64
-from Izhan_protocol import create_packet, parse_packet, caesar_encrypt, caesar_decrypt, caesar_shift_from_key, SS, EC, CM, DP, SC, EE, PROTOCOL_NAME, PROTOCOL_VERSION
+from Izhan_protocol import create_packet, parse_packet, caesar_encrypt, caesar_decrypt, caesar_shift_from_key, SS, EC, CM, DP, SC, EE, END, PROTOCOL_NAME, PROTOCOL_VERSION
 
 def handle_response(response):
     packet_type, fields = parse_packet(response)
@@ -264,6 +264,10 @@ while True:
         continue
 
     elif choice == "9":
+        end_packet = create_packet(END)
+        client_socket.send(end_packet.encode("utf-8"))
+
+        print("RFMP connection closed.")
         break
 
     else:
@@ -275,3 +279,5 @@ while True:
 
     response = client_socket.recv(2024).decode("utf-8")
     handle_response(response)
+
+client_socket.close()
