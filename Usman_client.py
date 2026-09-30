@@ -65,8 +65,8 @@ client_public_key = client_rsa_key.publickey()
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-host = socket.gethostname()
-port = 8000
+host = "127.0.0.1"
+port = 5555
 
 client_socket.connect((host, port))
 
