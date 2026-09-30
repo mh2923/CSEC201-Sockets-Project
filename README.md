@@ -7,6 +7,7 @@ RFMP (Remote File Management Protocol) lets a client manage files and folders on
 - `Usman_client.py`: Python client
 - `Yerkebulan_server.py`: Python server
 - `Izhan_protocol.py`: packet definitions shared by the client and server
+- `Izhan_client.c`: simplified non-secure C client (openRead only)
 
 **Packet types**
 - SS: start
