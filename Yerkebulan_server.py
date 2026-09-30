@@ -409,8 +409,8 @@ serverSocket = socket.socket(
     socket.SOCK_STREAM
 )
 
-host = socket.gethostname()
-port = 8000
+host = "127.0.0.1"
+port = 5555
 
 serverSocket.bind((host, port))
 serverSocket.listen(5)
