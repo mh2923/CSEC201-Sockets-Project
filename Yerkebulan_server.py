@@ -4,6 +4,7 @@ import socket
 import subprocess
 import base64
 import threading
+import os
 
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP, AES
@@ -212,45 +213,81 @@ def handle_client(clientsocket, addr):
 
                 command = fields[1]
 
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True
-                )
+                # Handle cd separately so the server directory actually changes
+                if command.lower().startswith("cd "):
+                    new_path = command[3:].strip()
 
-                # Command was successful
-                if result.returncode == 0:
-                    output = result.stdout.strip()
+                    try:
+                        os.chdir(new_path)
 
-                    if output == "":
-                        output = "Command executed successfully"
-
-                    success_packet = make_success_packet(
-                        output
-                    )
-
-                    clientsocket.send(
-                        success_packet.encode("utf-8")
-                    )
-
-                # Command failed
-                else:
-                    error_message = result.stderr.strip()
-
-                    if error_message == "":
-                        error_message = (
-                            "Invalid command or arguments"
+                        success_packet = make_success_packet(
+                            "Directory changed to " + os.getcwd()
                         )
 
-                    error_packet = make_error_packet(
-                        "E3",
-                        error_message
+                        clientsocket.send(
+                            success_packet.encode("utf-8")
+                        )
+
+                    except FileNotFoundError:
+                        error_packet = make_error_packet(
+                            "E1",
+                            "Directory not found: " + new_path
+                        )
+
+                        clientsocket.send(
+                            error_packet.encode("utf-8")
+                        )
+
+                    except Exception as e:
+                        error_packet = make_error_packet(
+                            "E3",
+                            str(e)
+                        )
+
+                        clientsocket.send(
+                            error_packet.encode("utf-8")
+                        )
+
+                else:
+                    result = subprocess.run(
+                        command,
+                        shell=True,
+                        capture_output=True,
+                        text=True
                     )
 
-                    clientsocket.send(
-                        error_packet.encode("utf-8")
-                    )
+                    # Command was successful
+                    if result.returncode == 0:
+                        output = result.stdout.strip()
+
+                        if output == "":
+                            output = "Command executed successfully"
+
+                        success_packet = make_success_packet(
+                            output
+                        )
+
+                        clientsocket.send(
+                            success_packet.encode("utf-8")
+                        )
+
+                    # Command failed
+                    else:
+                        error_message = result.stderr.strip()
+
+                        if error_message == "":
+                            error_message = (
+                                "Invalid command or arguments"
+                            )
+
+                        error_packet = make_error_packet(
+                            "E3",
+                            error_message
+                        )
+
+                        clientsocket.send(
+                            error_packet.encode("utf-8")
+                        )
 
 
             # Handle openRead
