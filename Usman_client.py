@@ -7,6 +7,7 @@ from Crypto.Random import get_random_bytes
 import base64
 from Izhan_protocol import create_packet, parse_packet, caesar_encrypt, caesar_decrypt, caesar_shift_from_key, SS, EC, CM, DP, SC, EE, END, PROTOCOL_NAME, PROTOCOL_VERSION
 
+# Handle Success (SC) and Exception (EE) responses from the server
 def handle_response(response):
     packet_type, fields = parse_packet(response)
 
@@ -15,10 +16,8 @@ def handle_response(response):
             print("Success: " + fields[0])
         else:
             print("Success")
-
     elif packet_type == EE:
         print("Error " + fields[0] + ": " + fields[1])
-
     else:
         print("Server: " + response)
 
@@ -26,7 +25,6 @@ def aes_encrypt(text, key):
     # Create an AES cipher using the session key
     cipher = AES.new(key, AES.MODE_EAX)
 
-    # Encrypt the text
     ciphertext, tag = cipher.encrypt_and_digest(
         text.encode("utf-8")
     )
@@ -36,7 +34,6 @@ def aes_encrypt(text, key):
 
     # Convert binary data to text so it can be sent in an RFMP packet
     return base64.b64encode(encrypted_data).decode("utf-8")
-
 
 def aes_decrypt(encrypted_text, key):
     # Convert the received Base64 text back to bytes
@@ -50,12 +47,10 @@ def aes_decrypt(encrypted_text, key):
     # Create the AES cipher using the same session key and nonce
     cipher = AES.new(key, AES.MODE_EAX, nonce=nonce)
 
-    # Decrypt and verify the data
     decrypted_data = cipher.decrypt_and_verify(
         ciphertext,
         tag
     )
-
     return decrypted_data.decode("utf-8")
 
 # Generate the client's RSA public and private keys
@@ -63,6 +58,7 @@ client_rsa_key = RSA.generate(2048)
 client_private_key = client_rsa_key
 client_public_key = client_rsa_key.publickey()
 
+# Create the TCP client socket and connect to the RFMP server
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 host = "127.0.0.1"
@@ -110,11 +106,9 @@ if secure_mode:
         server_public_key_text = base64.b64decode(
             server_public_key_text
         )
-
         server_public_key = RSA.import_key(
             server_public_key_text
         )
-
     else:
         print("Server public key was not received.")
         client_socket.close()
@@ -133,17 +127,14 @@ if secure_mode:
 
     if algorithm_choice == "1":
         algorithm = "AES"
-
     elif algorithm_choice == "2":
         algorithm = "Caesar"
-
     else:
         print("Invalid encryption choice.")
         client_socket.close()
         exit()
 
 if secure_mode:
-
     # Generate a random 16-byte session key
     session_key = get_random_bytes(16)
 
@@ -162,12 +153,7 @@ if secure_mode:
     ).decode("utf-8")
 
     # Create and send the Encryption Packet
-    encryption_packet = create_packet(
-        EC,
-        algorithm,
-        encrypted_session_key_text,
-        "Usman:" + client_public_key_text
-    )
+    encryption_packet = create_packet(EC, algorithm, encrypted_session_key_text, "Usman:" + client_public_key_text)
 
     client_socket.send(
         encryption_packet.encode("utf-8")
@@ -175,6 +161,7 @@ if secure_mode:
 
     print("Secure RFMP setup information sent to server.")
 
+# RFMP Operation Phase - allow the user to send commands to the server
 while True:
     print("\nRFMP Client")
     print("1. Create directory")
@@ -192,84 +179,61 @@ while True:
     if choice == "1":
         folder = input("Enter directory name: ")
         command = "mkdir " + folder
-
     elif choice == "2":
         path = input("Enter directory path: ")
         command = "cd " + path
-
     elif choice == "3":
         folder = input("Enter directory name: ")
         command = "rmdir " + folder
-
     elif choice == "4":
         filename = input("Enter file name: ")
         command = "del " + filename
-
     elif choice == "5":
         old_name = input("Enter current name: ")
         new_name = input("Enter new name: ")
         command = "ren " + old_name + " " + new_name
-
     elif choice == "6":
         command = input("Enter system command: ")
-
     elif choice == "7":
         filename = input("Enter file name to read: ")
-
         command_packet = create_packet(CM, "openRead", filename)
         client_socket.send(command_packet.encode("utf-8"))
-
         response = client_socket.recv(2024).decode("utf-8")
-
         if response.startswith("(EE,"):
             handle_response(response)
-
         else:
             # Decrypt file contents when secure mode is being used
             if secure_mode and algorithm == "AES":
                 response = aes_decrypt(response, session_key)
-
             elif secure_mode and algorithm == "Caesar":
                 shift = caesar_shift_from_key(session_key)
                 response = caesar_decrypt(response, shift)
-
             print("File contents: " + response)
-
         continue
-
     elif choice == "8":
         filename = input("Enter file name to write: ")
-
-        # Tell the server which file should be opened
         command_packet = create_packet(CM, "openWrite", filename)
         client_socket.send(command_packet.encode("utf-8"))
-
-        # Enter the data that will be written to the file
         text = input("Enter text to write: ")
 
         # Encrypt file contents when secure mode is being used
         if secure_mode and algorithm == "AES":
             text = aes_encrypt(text, session_key)
-
         elif secure_mode and algorithm == "Caesar":
             shift = caesar_shift_from_key(session_key)
             text = caesar_encrypt(text, shift)
-
         data_packet = create_packet(DP, text)
         client_socket.send(data_packet.encode("utf-8"))
-
         response = client_socket.recv(2024).decode("utf-8")
         handle_response(response)
-
         continue
 
+    # RFMP Closing Phase - send the End packet before closing the socket
     elif choice == "9":
         end_packet = create_packet(END)
         client_socket.send(end_packet.encode("utf-8"))
-
         print("RFMP connection closed.")
         break
-
     else:
         print("Invalid option.")
         continue
